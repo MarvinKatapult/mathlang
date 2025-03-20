@@ -1,0 +1,70 @@
+
+#include <stdio.h>
+#include <string.h>
+#include <assert.h>
+
+#include "cvecs.h"
+
+#define MAX_TOKEN_SIZE 1048
+static char buf[MAX_TOKEN_SIZE];
+static StrVec tokens;
+
+#define IS_WHITE_SPACE_TOKEN(C) (C == ' ' || C == '\n' || C == '\t')
+#define IS_OPERATOR(C)     (C == '(' || C == ')' || C == ';')
+
+void append_token_and_reset_buffer(char * buf) {
+    printf("Appending Token:>%s<\n", buf);
+    appendStrVec(&tokens, buf);
+    memset(buf, 0, MAX_TOKEN_SIZE);
+}
+
+int main(int argc, char * argv[]) {
+
+    if (argc <= 1) {
+        fprintf(stderr, "Usage: %s [File]\n", argv[0]);
+        return -1;
+    }
+
+    FILE * fp = fopen(argv[1], "r");
+    if (!fp) {
+        fprintf(stderr, "Could not open file >%s<", argv[1]);
+        return -1;
+    }
+
+    tokens = createStrVec();
+
+    char c = fgetc(fp);
+    while (c != EOF) {
+        const bool whitespace = IS_WHITE_SPACE_TOKEN(c);
+        const bool operator = IS_OPERATOR(c);
+        assert(!(whitespace && operator));
+
+        printf("Char:>%c<; Whitespace:%s; OneChar:%s\n", c, whitespace ? "true" : "false", operator ? "true" : "false");
+
+        if (whitespace) {
+            if (strlen(buf) != 0) {
+                printf("Appending Normal Token\n");
+                append_token_and_reset_buffer(buf);
+            } else printf("Skipping useless Whitespace\n");
+            goto NEXT_CHAR;
+        }
+
+        if (operator) {
+            printf("One Char Token\n");
+            if (strlen(buf) != 0) append_token_and_reset_buffer(buf);
+            buf[0] = c;
+            append_token_and_reset_buffer(buf);
+            goto NEXT_CHAR;
+        }
+
+        buf[strlen(buf)] = c; 
+NEXT_CHAR:
+        c = fgetc(fp);
+    }
+
+    for (int i = 0; i < tokens.count; i++) {
+        printf("%s\n", tokens.vals[i]);
+    }
+
+    return 0;
+}
