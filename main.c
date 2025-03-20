@@ -26,7 +26,7 @@ typedef struct SyntaxNode {
     TokenType type;
     SyntaxNode * left;
     SyntaxNode * right;
-    int value;
+    long value;
     Operator operator;
 } SyntaxNode;
 
@@ -53,7 +53,7 @@ const char * operatorToStr(Operator op) {
     assert(false);
 }
 
-SyntaxNode * createSyntaxNode(SyntaxNode * const left, SyntaxNode * const right, TokenType type, int value, Operator operator) {
+SyntaxNode * createSyntaxNode(SyntaxNode * const left, SyntaxNode * const right, TokenType type, long value, Operator operator) {
     SyntaxNode * ret = malloc(sizeof(SyntaxNode));
     assert(ret);
     ret->left = left;
@@ -71,11 +71,11 @@ void append_token_and_reset_buffer(char * buf, StrVec * tokens) {
     memset(buf, 0, MAX_TOKEN_SIZE);
 }
 
-bool strToInt(const char * str, int * val) {
+bool strToInt(const char * str, long * val) {
     const size_t len = strlen(str);
     for (size_t i = 0; i < len; i++) {
         if (!isdigit(str[i])) return false;
-        int add = str[i] - '0';
+        long add = str[i] - '0';
         for (size_t j = 1; j < len - i; j++) add *= 10;
         *val += add;
     }
@@ -131,6 +131,17 @@ bool tokenize(const char * expression, StrVec * tokens) {
     return true;
 }
 
+void appendSyntaxNode(SyntaxNode ** current_node, SyntaxNode ** new_node, bool first_token, SyntaxNode ** first) {
+    if (first_token) {
+        *current_node = *new_node;
+        *first = *current_node; 
+    } else {
+        (*current_node)->right = *new_node;
+        (*new_node)->left = *current_node;
+        *current_node = *new_node;
+    }
+}
+
 SyntaxNode * createSyntaxTree(const StrVec * tokens) {
 
     SyntaxNode * first = NULL;
@@ -139,64 +150,29 @@ SyntaxNode * createSyntaxTree(const StrVec * tokens) {
     for (size_t i = 0; i < tokens->count; i++) {
         const char * token = tokens->vals[i];
         const bool first_token = i == 0;
-        int val = 0;
+        long val = 0;
         bool is_value = strToInt(token, &val);
         if (is_value) {
             SyntaxNode * new_node = createSyntaxNode(current_node, NULL, TokenValue, val, NoOperator);
-            if (first_token) {
-                current_node = new_node;
-                first = new_node; 
-            } else {
-                current_node->right = new_node;
-                new_node->left = current_node;
-                current_node = new_node;
-            }
+            appendSyntaxNode(&current_node, &new_node, first_token, &first);
             continue;
         }
             
         if (strcmp(token, "+") == 0) {
             SyntaxNode * new_node = createSyntaxNode(current_node, NULL, TokenOperator, 0, OperatorPlus);
-            if (first_token) {
-                current_node = new_node;
-                first = current_node; 
-            } else {
-                current_node->right = new_node;
-                new_node->left = current_node;
-                current_node = new_node;
-            }
+            appendSyntaxNode(&current_node, &new_node, first_token, &first);
             continue;
         } else if (strcmp(token, "-") == 0) {
             SyntaxNode * new_node = createSyntaxNode(current_node, NULL, TokenOperator, 0, OperatorMinus);
-            if (first_token) {
-                current_node = new_node;
-                first = current_node; 
-            } else {
-                current_node->right = new_node;
-                new_node->left = current_node;
-                current_node = new_node;
-            }
+            appendSyntaxNode(&current_node, &new_node, first_token, &first);
             continue;
         } else if (strcmp(token, "*") == 0) {
             SyntaxNode * new_node = createSyntaxNode(current_node, NULL, TokenOperator, 0, OperatorMult);
-            if (first_token) {
-                current_node = new_node;
-                first = current_node; 
-            } else {
-                current_node->right = new_node;
-                new_node->left = current_node;
-                current_node = new_node;
-            }
+            appendSyntaxNode(&current_node, &new_node, first_token, &first);
             continue;
         } else if (strcmp(token, "/") == 0) {
             SyntaxNode * new_node = createSyntaxNode(current_node, NULL, TokenOperator, 0, OperatorDiv);
-            if (first_token) {
-                current_node = new_node;
-                first = current_node; 
-            } else {
-                current_node->right = new_node;
-                new_node->left = current_node;
-                current_node = new_node;
-            }
+            appendSyntaxNode(&current_node, &new_node, first_token, &first);
             continue;
         }
         assert(false); // UNREACHABLE
@@ -215,7 +191,7 @@ void checkSyntax(const SyntaxNode * root) {
             case TokenValue:
                 if (current->right) {
                     if (current->right->type != TokenOperator) {
-                        fprintf(stderr, "Syntax Error at Token with Value:%d. Expected Operator\n", current->value);
+                        fprintf(stderr, "Syntax Error at Token with Value:%ld. Expected Operator\n", current->value);
                         exit(1);
                     }
                 }
@@ -235,7 +211,7 @@ void checkSyntax(const SyntaxNode * root) {
     }
 }
 
-int applyOperator(int a, int b, Operator operator) {
+long applyOperator(long a, long b, Operator operator) {
     switch (operator) {
         case OperatorPlus:
             return a + b;
@@ -251,7 +227,7 @@ int applyOperator(int a, int b, Operator operator) {
     }
 }
 
-int calculateResult(SyntaxNode * root) {
+long calculateResult(SyntaxNode * root) {
 
     OperationStep current_step = MultDiv;
     SyntaxNode * current = root;
@@ -272,7 +248,7 @@ int calculateResult(SyntaxNode * root) {
 
             }
             if (calc) {
-                printf("--- Applying Operation: %d %s %d\n", current->left->value, operatorToStr(current->operator), current->right->value);
+                printf("--- Applying Operation: %ld %s %ld\n", current->left->value, operatorToStr(current->operator), current->right->value);
                 current->value = applyOperator(current->left->value, current->right->value, current->operator);
                 current->operator = NoOperator;
                 current->type = TokenValue;
@@ -306,7 +282,7 @@ int calculateResult(SyntaxNode * root) {
         current_step += 1;
     }
 
-    const int ret = current->value;
+    const long ret = current->value;
     free(current);
     return ret;
 }
@@ -349,7 +325,7 @@ int main(int argc, char * argv[]) {
     printf("-- Syntax Check Sucess!!\n");
 
     printf("-- Resolving Syntaxtree\n");
-    printf("Result of Expression:\n%d\n", calculateResult(root));
+    printf("Result of Expression:\n%ld\n", calculateResult(root));
 
     freeStrVec(tokens);
     return 0;
