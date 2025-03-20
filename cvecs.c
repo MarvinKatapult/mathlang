@@ -4,7 +4,7 @@
 #include <string.h>
 
 static size_t calcNewVecCap(size_t capacity) {
-    return capacity + ((float)capacity / DEFAULT_CAP_VEC) * DEFAULT_CAP_VEC;
+    return (size_t)((float)capacity + ((float)capacity / DEFAULT_CAP_VEC) * DEFAULT_CAP_VEC);
 }
 
 static bool setVecCapacity(void ** start, size_t cap, size_t size) {
