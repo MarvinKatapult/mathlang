@@ -2,9 +2,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
-#include <math.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <math.h>
 
 #include "cvecs.h"
 
@@ -19,6 +19,7 @@ typedef enum Operator {
     OperatorMinus,
     OperatorMult,
     OperatorDiv,
+    OperatorPower,
 } Operator;
 
 typedef struct SyntaxNode SyntaxNode;
@@ -26,21 +27,36 @@ typedef struct SyntaxNode {
     TokenType type;
     SyntaxNode * left;
     SyntaxNode * right;
-    long value;
+    double value;
     Operator operator;
 } SyntaxNode;
 
 typedef enum OperationStep {
-    MultDiv = 0,
+    Exp = 0,
+    MultDiv,
     AddSub,
 } OperationStep;
 
 #define MAX_TOKEN_SIZE 1048
 
 #define IS_WHITE_SPACE_TOKEN(C) (C == ' ' || C == '\n' || C == '\t' || c == '\0')
-#define IS_OPERATOR(C)     (C == '+' || C == '-' || C == '*' || C == '/' || C == '(' || C == ')')
+#define IS_OPERATOR(C)     (C == '+' || C == '-' || C == '*' || C == '/' || C == '(' || C == ')' || C == '^')
 
 #define BOOL_TO_STR(B)     ((B) ? "true" : "false")
+#define ABS(X) ((X) > 0 ? (X) : (-(X)))
+
+static char err_msg[1024];
+#define SHOW_ERROR    fprintf(stderr, err_msg)
+#define SHOW_ERROR_AND_ABORT SHOW_ERROR; exit(-1)
+
+size_t find_dot_pos(const char * str) {
+    const char * current = str;
+    while (*current) {
+        if (*current == '.') return (size_t)(current - str);
+        current++;
+    }
+    return 0;
+}
 
 const char * operatorToStr(Operator op) {
     switch (op) {
@@ -49,11 +65,12 @@ const char * operatorToStr(Operator op) {
         case OperatorMinus: return "-";
         case OperatorMult: return "*";
         case OperatorDiv: return "/";
+        case OperatorPower: return "^";
     }
     assert(false);
 }
 
-SyntaxNode * createSyntaxNode(SyntaxNode * const left, SyntaxNode * const right, TokenType type, long value, Operator operator) {
+SyntaxNode * createSyntaxNode(SyntaxNode * const left, SyntaxNode * const right, TokenType type, double value, Operator operator) {
     SyntaxNode * ret = malloc(sizeof(SyntaxNode));
     assert(ret);
     ret->left = left;
@@ -71,12 +88,23 @@ void append_token_and_reset_buffer(char * buf, StrVec * tokens) {
     memset(buf, 0, MAX_TOKEN_SIZE);
 }
 
-bool strToInt(const char * str, long * val) {
+bool strToValue(const char * str, double * val) {
+    size_t dot_pos = find_dot_pos(str);
+    if (dot_pos) dot_pos++;
     const size_t len = strlen(str);
+    bool after_decimal = false;
     for (size_t i = 0; i < len; i++) {
+        if (str[i] == '.' && !after_decimal) {
+            after_decimal = true;
+            continue;
+        }
         if (!isdigit(str[i])) return false;
-        long add = str[i] - '0';
-        for (size_t j = 1; j < len - i; j++) add *= 10;
+
+        double add = str[i] - '0';
+        const size_t mult_count = dot_pos ? dot_pos - 2 - i : len - i - 1;
+        const size_t div_count  = i - (dot_pos - 1);
+        if (!after_decimal) for (size_t j = 0; j < mult_count; j++) add *= 10.;
+        else                for (size_t j = 0; j < div_count;  j++) add /= 10.;
         *val += add;
     }
     return true;
@@ -86,7 +114,7 @@ bool tokenize(const char * expression, StrVec * tokens);
 bool tokenize_file(const char * filename, StrVec * tokens) {
     FILE * fp = fopen(filename, "r");
     if (!fp) {
-        fprintf(stderr, "Could not open file >%s<\n", filename);
+        sprintf(err_msg, "Could not open file >%s<\n", filename);
         return false;
     }
     
@@ -150,8 +178,8 @@ SyntaxNode * createSyntaxTree(const StrVec * tokens) {
     for (size_t i = 0; i < tokens->count; i++) {
         const char * token = tokens->vals[i];
         const bool first_token = i == 0;
-        long val = 0;
-        bool is_value = strToInt(token, &val);
+        double val = 0;
+        bool is_value = strToValue(token, &val);
         if (is_value) {
             SyntaxNode * new_node = createSyntaxNode(current_node, NULL, TokenValue, val, NoOperator);
             appendSyntaxNode(&current_node, &new_node, first_token, &first);
@@ -174,14 +202,20 @@ SyntaxNode * createSyntaxTree(const StrVec * tokens) {
             SyntaxNode * new_node = createSyntaxNode(current_node, NULL, TokenOperator, 0, OperatorDiv);
             appendSyntaxNode(&current_node, &new_node, first_token, &first);
             continue;
+        } else if (strcmp(token, "^") == 0) {
+            SyntaxNode * new_node = createSyntaxNode(current_node, NULL, TokenOperator, 0, OperatorPower);
+            appendSyntaxNode(&current_node, &new_node, first_token, &first);
+            continue;
         }
-        assert(false); // UNREACHABLE
+
+        sprintf(err_msg, "Unknown Operator >%s<\n", token);
+        return NULL;
     }
 
     return first;
 }
 
-void checkSyntax(const SyntaxNode * root) {
+bool checkSyntax(const SyntaxNode * root) {
     assert(!root->left); // Root has to be a root
 
     const SyntaxNode * current = root;
@@ -191,45 +225,58 @@ void checkSyntax(const SyntaxNode * root) {
             case TokenValue:
                 if (current->right) {
                     if (current->right->type != TokenOperator) {
-                        fprintf(stderr, "Syntax Error at Token with Value:%ld. Expected Operator\n", current->value);
-                        exit(1);
+                        sprintf(err_msg, "Syntax Error at Token with Value:%lf. Expected Operator\n", current->value);
+                        return false;
                     }
                 }
                 break;
             case TokenOperator:
                 if (!current->left || !current->right) {
-                    fprintf(stderr, "Syntax Error at Token with Operator:%s. Expected Value %s\n", operatorToStr(current->operator), current->left ? "next" : "before");
-                    exit(1);
+                    sprintf(err_msg, "Syntax Error at Token with Operator:%s. Expected Value %s\n", operatorToStr(current->operator), current->left ? "next" : "before");
+                    return false;
                 }
                 if (current->left->type != TokenValue || current->right->type != TokenValue) {
-                    fprintf(stderr, "Syntax Error at Token with Operator:%s. Expected Value next\n", operatorToStr(current->operator));
-                    exit(1);
+                    sprintf(err_msg, "Syntax Error at Token with Operator:%s. Expected Value next\n", operatorToStr(current->operator));
+                    return false;
                 }
                 break;
         }
         current = current->right;
     }
+    return true;
 }
 
-long applyOperator(long a, long b, Operator operator) {
+bool applyOperator(double a, double b, Operator operator, double * result) {
+    if (!result) return false;
     switch (operator) {
         case OperatorPlus:
-            return a + b;
+            *result = a + b;
+            return true;
             break;
         case OperatorMinus:
-            return a - b;
+            *result = a - b;
+            return true;
+            break;
         case OperatorMult:
-            return a * b;
+            *result = a * b;
+            return true;
+            break;
         case OperatorDiv:
-            return a / b;
-        default:
-            assert(false);
+            *result = a / b;
+            return true;
+            break;
+        case OperatorPower:
+            *result = pow(a, b);
+            return true;
+        case NoOperator:
+            break;
     }
+    return false;
 }
 
-long calculateResult(SyntaxNode * root) {
+bool calculateResult(SyntaxNode * root, double * result) {
 
-    OperationStep current_step = MultDiv;
+    OperationStep current_step = Exp;
     SyntaxNode * current = root;
     while (true) {
         while (current) {
@@ -239,6 +286,9 @@ long calculateResult(SyntaxNode * root) {
             }
             bool calc = false;
             switch (current_step) {
+                case Exp:
+                    calc = current->operator == OperatorPower;
+                    break;
                 case MultDiv:
                     calc = current->operator == OperatorMult || current->operator == OperatorDiv;
                     break;
@@ -248,8 +298,11 @@ long calculateResult(SyntaxNode * root) {
 
             }
             if (calc) {
-                printf("--- Applying Operation: %ld %s %ld\n", current->left->value, operatorToStr(current->operator), current->right->value);
-                current->value = applyOperator(current->left->value, current->right->value, current->operator);
+                printf("--- Applying Operation: %lf %s %lf\n", current->left->value, operatorToStr(current->operator), current->right->value);
+                if(!applyOperator(current->left->value, current->right->value, current->operator, &current->value)) {
+                    sprintf(err_msg, "Cannot apply Operator >%s<\n", operatorToStr(current->operator));
+                    return false;
+                }
                 current->operator = NoOperator;
                 current->type = TokenValue;
 
@@ -282,9 +335,9 @@ long calculateResult(SyntaxNode * root) {
         current_step += 1;
     }
 
-    const long ret = current->value;
+    *result = current->value;
     free(current);
-    return ret;
+    return true;
 }
 
 int main(int argc, char * argv[]) {
@@ -307,8 +360,7 @@ int main(int argc, char * argv[]) {
     printf("-- Creating Syntax Tree\n");
     SyntaxNode * root = createSyntaxTree(&tokens);
     if (!root) {
-        fprintf(stderr, "Creating Syntax Tree failed\n");
-        return -1;
+        SHOW_ERROR_AND_ABORT;
     }
     printf("-- Creating Syntax Tree Sucess!\n");
 
@@ -321,11 +373,17 @@ int main(int argc, char * argv[]) {
     */
 
     printf("-- Checking Syntax\n");
-    checkSyntax(root);
+    if (!checkSyntax(root)) {
+        SHOW_ERROR_AND_ABORT;
+    }
     printf("-- Syntax Check Sucess!!\n");
 
     printf("-- Resolving Syntaxtree\n");
-    printf("Result of Expression:\n%ld\n", calculateResult(root));
+    double result;
+    if (!calculateResult(root, &result)) {
+        SHOW_ERROR_AND_ABORT;
+    }
+    printf("Result of Expression:\n%lf\n", result);
 
     freeStrVec(tokens);
     return 0;
