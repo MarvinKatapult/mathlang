@@ -1,5 +1,6 @@
 # Todo
 - Parenthese
 - Sqrt
-- Exponent
 - Math Constants
+- Live Input Mode
+- Better Error Messages
